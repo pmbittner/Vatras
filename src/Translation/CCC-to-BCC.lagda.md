@@ -32,7 +32,7 @@ open import Data.Product
 open import Data.String
   using (String; _++_)
 open import Function
-  using (_∘_; flip)
+  using (id; _∘_; flip)
 open import Size
   using (Size; ∞; ↑_; _⊔ˢ_)
 
@@ -326,23 +326,312 @@ CCC→BCC =
   }
 ```
 
+# As inference rules
+
+## Translation of Expressions
+
+```agda
+data _,_⊢_⟶_ : ∀ {A : Domain} → (i : Size) → ℕ → CCC i A → BCC ∞ A → Set
+infix 3 _,_⊢_⟶_
+
+data _,_,_⊢_⟶ᶜ_ : ∀ {A : Domain} → (i : Size) → ℕ → Dimension → List⁺ (CCC i A) → BCC ∞ A → Set
+infix 3 _,_,_⊢_⟶ᶜ_
+
+data _,_⊢_⟶_ where
+  -- leaf translation is trivial
+  E-Artifact-Leaf :
+     ∀ {A : Domain}
+       {i : Size}
+       {n : ℕ}
+       {a : A}
+       ------------------------------------------
+     → ↑ i , n ⊢ Artifactₙ a [] ⟶ Artifact₂ a []
+
+  {-|
+  For artifacts, we recurse on each element.
+  As a trick to reapply the artifact rules, we wrap the tail in an artifact again.
+  This unfortunately requires some separete unwrapping boilerplate in later proofs.
+  However, simplification measures I tried to not wrap the recursion on the tail in a new Artifact failed or were less convenient.
+  I tried to:
+    - Use All on lists to say that all es can be reduced via a list predicate. This requires to deal with All in later proofs which is ok but not less boilerplate and probably harder to understand.
+    - Use a separate relation (i.e., another set of inference rules) solely for artifact recursion but I got into some pattern matching problems with Agda that I couldnt resolve.
+  -}
+  E-Artifact :
+     ∀ {A : Domain}
+       {i : Size}
+       {n : ℕ}
+       {a : A}
+       {e  : CCC i A}
+       {es : List (CCC i A)}
+       {e'  : BCC ∞ A}
+       {es' : List (BCC ∞ A)}
+     →   i , n ⊢ e ⟶ e'
+     → ↑ i , n ⊢ Artifactₙ a es ⟶ Artifact₂ a es'
+       --------------------------------------------------------
+     → ↑ i , n ⊢ Artifactₙ a (e ∷ es) ⟶ Artifact₂ a (e' ∷ es')
+
+  {-|
+  Unary choices are mandatory so we can just recursively translate what's in the choice and go with that.
+  No choices to make so we strip it off.
+  -}
+  E-Choice-Unary :
+    ∀ {i : Size}
+      {n : ℕ}
+      {A : Domain}
+      {D : Dimension}
+      {m : CCC i A}
+      {m' : BCC ∞ A}
+    →   i , n ⊢ m ⟶ m'
+      ---------------------------
+    → ↑ i , n ⊢ D ⟨ m ∷ [] ⟩ₙ ⟶ m'
+
+  {-|
+  Choices that have more than one alternative have to be unrolled.
+  This is the crucial step of the translation from core to binary choice calculus.
+  We create a new dimension whose name is indexed by the current unroll depth we are in.
+  We recursively translate the first alternative "a".
+  We recursively unroll the tail alternatives "b ∷ cs", going one level deeper into unrolling (suc n).
+  -}
+  E-Choice-Unroll :
+    ∀ {i : Size}
+      {n : ℕ}
+      {A : Domain}
+      {D : Dimension}
+      {a b : CCC i A}
+      {cs : List (CCC i A)}
+      {a' bcs' : BCC ∞ A}
+    →   i , suc n ⊢ a ⟶ a'
+    → ↑ i , suc n ⊢ D ⟨ b ∷ cs ⟩ₙ ⟶ bcs'
+      ----------------------------------------------------------------
+    → ↑ i ,     n ⊢ D ⟨ a ∷ b ∷ cs ⟩ₙ ⟶ (indexedDim D n) ⟨ a' , bcs' ⟩₂
+
+data _,_,_⊢_⟶ᶜ_ where
+  EE-Choice-Unary :
+    ∀ {i : Size}
+      {n : ℕ}
+      {A : Domain}
+      {D : Dimension}
+      {m : CCC i A} -- m for mandatory
+      {m' : BCC ∞ A}
+    →   i , n     ⊢ m ⟶ m'
+      ---------------------------
+    → ↑ i , n , D ⊢ m ∷ [] ⟶ᶜ m'
+
+  EE-Choice-Unroll :
+    ∀ {i : Size}
+      {n : ℕ}
+      {A : Domain}
+      {D : Dimension}
+      {a b : CCC i A}
+      {cs : List (CCC i A)}
+      {a' bcs' : BCC ∞ A}
+    →   i , suc n     ⊢ a ⟶ a'
+    → ↑ i , suc n , D ⊢ b ∷ cs ⟶ᶜ bcs'
+      ----------------------------------------------------------------
+    → ↑ i ,     n , D ⊢ a ∷ b ∷ cs ⟶ᶜ (indexedDim D n) ⟨ a' , bcs' ⟩₂
+```
+
+### Determinism
+
+#### Theorems
+```agda
+⟶-is-deterministic : ∀ {i} {A} {n} {e : CCC i A} {b b' : BCC ∞ A}
+  → i , n ⊢ e ⟶ b
+  → i , n ⊢ e ⟶ b'
+    ---------------
+  → b ≡ b'
+
+⟶ᶜ-is-deterministic : ∀ {i} {A} {D} {n} {es : List⁺ (CCC i A)} {b b' : BCC ∞ A}
+  → i , n , D ⊢ es ⟶ᶜ b
+  → i , n , D ⊢ es ⟶ᶜ b'
+    ---------------------
+  → b ≡ b'
+
+artifact₂-tail-equals : ∀ {i : Size} {A : Domain} {a : A} {es es' : List (BCC i A)}
+  → Artifact₂ a es ≡ Artifact₂ a es'
+  → es ≡ es'
+artifact₂-tail-equals refl = refl
+
+⟶-is-deterministic E-Artifact-Leaf E-Artifact-Leaf = refl
+⟶-is-deterministic (E-Artifact ⟶e₁ ⟶es₁) (E-Artifact ⟶e₂ ⟶es₂)
+  rewrite ⟶-is-deterministic ⟶e₁ ⟶e₂ | artifact₂-tail-equals (⟶-is-deterministic ⟶es₁ ⟶es₂)
+  = refl
+⟶-is-deterministic (E-Choice-Unary ⟶b) (E-Choice-Unary ⟶b') = ⟶-is-deterministic ⟶b ⟶b'
+⟶-is-deterministic (E-Choice-Unroll ⟶a ⟶bcs) (E-Choice-Unroll ⟶a' ⟶bcs')
+  rewrite (⟶-is-deterministic ⟶a ⟶a') | (⟶-is-deterministic ⟶bcs ⟶bcs')
+  = refl
+
+⟶ᶜ-is-deterministic {i} {A} {D} {n} {es} {b} {b'} (EE-Choice-Unary ⟶b) x = {!!}
+⟶ᶜ-is-deterministic (EE-Choice-Unroll ⟶a ⟶bcs) ()
+```
+
+### Totality (i.e., Progress)
+
+```agda
+Total : ∀ {i} {A} → ℕ → CCC i A → Set
+Total {i} n e = ∃[ b ] (i , n ⊢ e ⟶ b)
+
+from-rule : ∀ {i} {n} {A} {e : CCC i A} {b : BCC ∞ A}
+  → i , n ⊢ e ⟶ b
+    --------------
+  → Total n e
+from-rule {b = b} r = b , r
+
+⟶-is-total-Artifact : ∀ {i} {n} {A}
+  → (a : A)
+  → (e : CCC i A)
+  → (es : List (CCC i A))
+  → Total n e
+  → Total n (Artifactₙ a es)
+    ----------------------
+  → Total n (Artifactₙ a (e ∷ es))
+⟶-is-total-Artifact a e .[]      (e' , ⟶e') (Artifact₂ .a .[]      , E-Artifact-Leaf)
+  = from-rule (E-Artifact ⟶e' E-Artifact-Leaf)
+⟶-is-total-Artifact a e .(_ ∷ _) (e' , ⟶e') (Artifact₂ .a .(_ ∷ _) , E-Artifact ⟶es-head ⟶es-tail)
+  = from-rule (E-Artifact ⟶e' (E-Artifact ⟶es-head ⟶es-tail))
+
+⟶-is-total : ∀ {i} {A}
+  → (n : ℕ)
+  → (e : CCC i A)
+    -------------
+  → Total n e
+⟶-is-total _ (Artifactₙ a [])       = from-rule E-Artifact-Leaf
+⟶-is-total n (Artifactₙ a (e ∷ es)) = ⟶-is-total-Artifact a e es (⟶-is-total n e) (⟶-is-total n (Artifactₙ a es))
+⟶-is-total n (D ⟨ a ∷ [] ⟩ₙ)         = from-rule (E-Choice-Unary (proj₂ (⟶-is-total n a)))
+⟶-is-total n (D ⟨ a ∷ b ∷ cs ⟩ₙ)     = {!!}
+  -- let ⟶a   = proj₂ (⟶-is-total (suc n) a)
+  --     ⟶bcs = proj₂ (⟶-is-total (suc n) (D ⟨ b ∷ cs ⟩ₙ))
+  --  in from-rule (E-Choice-Unroll ⟶a ⟶bcs)
+```
+
+## Translation of Configurations
+
+```agda
+Conf : Set
+Conf = Configurationₙ → Configuration₂
+
+Fnoc : Set
+Fnoc = Configuration₂ → Configurationₙ
+
+all-left : Conf
+all-left cₙ D = true
+
+all-first : Fnoc
+all-first c₂ D = 0
+
+--\rr-
+data _,_⊢_↠_ : ∀ {A : Domain} {i : Size} → ℕ → CCC i A → Conf → Conf → Set
+infix 3 _,_⊢_↠_
+
+--\ll-
+data _⊢_↞_ : ∀ {A : Domain} {i : Size} → CCC i A → Fnoc → Fnoc → Set
+infix 3 _⊢_↞_
+
+data _,_⊢_↠_ where
+  C-Artifact-Leaf :
+     ∀ {n : ℕ}
+       {A : Domain}
+       {a : A}
+       {c : Conf}
+       -----------------------
+     → n , Artifactₙ a [] ⊢ c ↠ c
+
+  C-Artifact :
+     ∀ {n : ℕ}
+       {i : Size}
+       {A : Domain}
+       {a : A}
+       {e : CCC i A}
+       {es : List (CCC i A)}
+       {c c' c'' : Conf}
+     → n ,              e       ⊢ c  ↠ c'
+     → n , Artifactₙ a      es  ⊢ c' ↠ c''
+       -------------------------------
+     → n , Artifactₙ a (e ∷ es) ⊢ c  ↠ c''
+
+  C-Choice-Unary :
+    ∀ {n : ℕ}
+      {i : Size}
+      {A : Domain}
+      {D : Dimension}
+      {m : CCC i A}
+      {c c' : Conf}
+    → n ,   m ⊢ c ↠ c'
+      --------------------------
+    → n , D ⟨ m ∷ [] ⟩ₙ ⊢ c ↠ c'
+
+  C-Choice-Unroll :
+    ∀ {n : ℕ}
+      {i : Size}
+      {A : Domain}
+      {D : Dimension}
+      {a b : CCC i A}
+      {cs : List (CCC i A)}
+      {c c' c'' : Conf}
+    → suc n ,     a            ⊢ c ↠ c'
+    → suc n , D ⟨     b ∷ cs ⟩ₙ ⊢ c' ↠ c''
+      -----------------------------------
+    →     n , D ⟨ a ∷ b ∷ cs ⟩ₙ ⊢ c ↠ (λ {cₙ queried-output-dimension →
+          -- If the queried dimension was translated from our currently translated dimension D.
+          if queried-output-dimension == (indexedDim D n)
+          -- If the selection made in the input formula did select the left alternative of our choice
+          -- then also pick it in the binary output formula. Otherwise, do not pick it.
+          -- In case cₙ D <ᵇ n, the result does not matter. Then, an alternative above this choice was already chosen
+          -- (and we are within an else branch). So it does not matter what we pick here. Could be true, false, or n→b cₙ queried-output-dimension.
+          -- In case cₙ D >ᵇ n, the result has to be false because the alternative that has to be picked is on the right, which is only checked if we do not go left here.
+          then cₙ D nat-≡ᵇ n
+          -- If not, ask our existing configuration translation knowledge.
+          else c'' cₙ queried-output-dimension
+          })
+
+data _⊢_↞_ where
+```
+
+
+### Determinism
+
+### Totality
+
+## Preservation
+
+```agda
+preserves-l : ∀ {i} {n} {A} {e : CCC i A} {b : BCC ∞ A} {c : Conf}
+  → (cₙ : Configurationₙ)
+  → i , n ⊢ e ⟶ b
+  → n , e ⊢ all-left ↠ c
+    -----------------------------
+  → ⟦ e ⟧ₙ cₙ ≡ ⟦ b ⟧₂ (c cₙ)
+preserves-l = {!!}
+
+preserves-r : ∀ {i} {n} {A} {e : CCC i A} {b : BCC ∞ A} {c : Fnoc}
+  → (c₂ : Configuration₂)
+  → i , n ⊢ e ⟶ b
+  → e ⊢ c ↞ all-first
+    -----------------------------
+  → ⟦ e ⟧ₙ (c c₂) ≡ ⟦ b ⟧₂ c₂
+preserves-r = {!!}
+```
+
+
+### Old proofs
+
 Now we prove that conversion to binary normal form is variant-preserving (i.e., the set of described variants is the same).
 ```
-CCC→BCC-left : ∀ {i : Size} {A : Domain}
-  → (e : CCC i A)
-    ---------------------
-  → e ⊆-via CCC→BCC
+-- CCC→BCC-left : ∀ {i : Size} {A : Domain}
+--   → (e : CCC i A)
+--     ---------------------
+--   → e ⊆-via CCC→BCC
 
-CCC→BCC-right : ∀ {i : Size} {A : Domain}
-  → (e : CCC i A)
-    ---------------------
-  → e ⊇-via CCC→BCC
+-- CCC→BCC-right : ∀ {i : Size} {A : Domain}
+--   → (e : CCC i A)
+--     ---------------------
+--   → e ⊇-via CCC→BCC
 
-CCC→BCC-is-variant-preserving : CCC→BCC is-variant-preserving
-CCC→BCC-is-variant-preserving e = CCC→BCC-left e , CCC→BCC-right e
+-- CCC→BCC-is-variant-preserving : CCC→BCC is-variant-preserving
+-- CCC→BCC-is-variant-preserving e = CCC→BCC-left e , CCC→BCC-right e
 
-BCC-is-at-least-as-expressive-as-CCC : BCC , ⟦_⟧₂ is-at-least-as-expressive-as CCC , ⟦_⟧ₙ
-BCC-is-at-least-as-expressive-as-CCC = translation-proves-variant-preservation CCC→BCC CCC→BCC-is-variant-preserving
+-- BCC-is-at-least-as-expressive-as-CCC : BCC , ⟦_⟧₂ is-at-least-as-expressive-as CCC , ⟦_⟧ₙ
+-- BCC-is-at-least-as-expressive-as-CCC = translation-proves-variant-preservation CCC→BCC CCC→BCC-is-variant-preserving
 ```
 
 Comments by Jeff:
@@ -354,46 +643,46 @@ Comments by Jeff:
 #### Proof of the left side
 
 ```agda
-CCC→BCC-left (Artifactₙ a []) c₂ = refl
-CCC→BCC-left e@(Artifactₙ a es@(_ ∷ _)) cₙ =
-  let -- open RawFunctor state-functor
-      c₂ = conf (translate e) cₙ
-  in
-  begin
-    ⟦ e ⟧ₙ cₙ
-  ≡⟨⟩
-    Artifactᵥ a (mapl (flip ⟦_⟧ₙ cₙ) es)
-  -- TODO: Somehow apply the induction hypothesis below the sequenceA below the runState below the mapl below the Artifactᵥ
-  ≡⟨ {!!}  ⟩
-    ⟦ expr (translate e) ⟧₂ c₂
-  ∎
-CCC→BCC-left (D ⟨ e ∷ [] ⟩ₙ) cₙ =
-  let c₂ = conf (translate (D ⟨ e ∷ [] ⟩ₙ)) cₙ in
-  ⟦ D ⟨ e ∷ [] ⟩ₙ ⟧ₙ cₙ                   ≡⟨⟩
-  ⟦ e           ⟧ₙ cₙ                    ≡⟨ CCC→BCC-left e cₙ ⟩
-  ⟦ expr (translate e)              ⟧₂ c₂ ≡⟨⟩
-  ⟦ expr (translate (D ⟨ e ∷ [] ⟩ₙ)) ⟧₂ c₂ ∎
-CCC→BCC-left e@(D ⟨ es@(_ ∷ _ ∷ _) ⟩ₙ) cₙ =
-  let c₂ = conf (translate e) cₙ
-      e₂ = translate e
-  in
-  begin
-    ⟦ e ⟧ₙ cₙ
-  ≡⟨⟩
-    ⟦ choice-elimination (cₙ D) es ⟧ₙ cₙ
-  --≡⟨ {!!} ⟩
-  --  ⟦ if (c₂ D) then {!!} else {!!} ⟧₂ c₂
-  ≡⟨ {!!} ⟩
-    ⟦ expr (translate e) ⟧₂ c₂
-  ∎
+-- CCC→BCC-left (Artifactₙ a []) c₂ = refl
+-- CCC→BCC-left e@(Artifactₙ a es@(_ ∷ _)) cₙ =
+--   let -- open RawFunctor state-functor
+--       c₂ = conf (translate e) cₙ
+--   in
+--   begin
+--     ⟦ e ⟧ₙ cₙ
+--   ≡⟨⟩
+--     Artifactᵥ a (mapl (flip ⟦_⟧ₙ cₙ) es)
+--   -- TODO: Somehow apply the induction hypothesis below the sequenceA below the runState below the mapl below the Artifactᵥ
+--   ≡⟨ {!!}  ⟩
+--     ⟦ expr (translate e) ⟧₂ c₂
+--   ∎
+-- CCC→BCC-left (D ⟨ e ∷ [] ⟩ₙ) cₙ =
+--   let c₂ = conf (translate (D ⟨ e ∷ [] ⟩ₙ)) cₙ in
+--   ⟦ D ⟨ e ∷ [] ⟩ₙ ⟧ₙ cₙ                   ≡⟨⟩
+--   ⟦ e           ⟧ₙ cₙ                    ≡⟨ CCC→BCC-left e cₙ ⟩
+--   ⟦ expr (translate e)              ⟧₂ c₂ ≡⟨⟩
+--   ⟦ expr (translate (D ⟨ e ∷ [] ⟩ₙ)) ⟧₂ c₂ ∎
+-- CCC→BCC-left e@(D ⟨ es@(_ ∷ _ ∷ _) ⟩ₙ) cₙ =
+--   let c₂ = conf (translate e) cₙ
+--       e₂ = translate e
+--   in
+--   begin
+--     ⟦ e ⟧ₙ cₙ
+--   ≡⟨⟩
+--     ⟦ choice-elimination (cₙ D) es ⟧ₙ cₙ
+--   --≡⟨ {!!} ⟩
+--   --  ⟦ if (c₂ D) then {!!} else {!!} ⟧₂ c₂
+--   ≡⟨ {!!} ⟩
+--     ⟦ expr (translate e) ⟧₂ c₂
+--   ∎
 ```
 
 #### Proof of the right side
 
 ```agda
--- Every variant described by an n-ary CC expression, is also described by its translation to binray CC.
-CCC→BCC-right (Artifactₙ a []) _ = refl
-CCC→BCC-right (Artifactₙ a es@(_ ∷ _)) c₂ = {!!}
-CCC→BCC-right (D ⟨ e ∷ [] ⟩ₙ) c₂ = CCC→BCC-right e c₂ -- just apply the induction hypothesis on the only mandatory alternative
-CCC→BCC-right (D ⟨ es@(_ ∷ _ ∷ _) ⟩ₙ) c₂ = {!!}
+-- -- Every variant described by an n-ary CC expression, is also described by its translation to binray CC.
+-- CCC→BCC-right (Artifactₙ a []) _ = refl
+-- CCC→BCC-right (Artifactₙ a es@(_ ∷ _)) c₂ = {!!}
+-- CCC→BCC-right (D ⟨ e ∷ [] ⟩ₙ) c₂ = CCC→BCC-right e c₂ -- just apply the induction hypothesis on the only mandatory alternative
+-- CCC→BCC-right (D ⟨ es@(_ ∷ _ ∷ _) ⟩ₙ) c₂ = {!!}
 ```

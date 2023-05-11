@@ -1,39 +1,51 @@
 module Translation.UnifyError where
 
 open import Data.Nat
-open import Data.List
+open import Data.List using (List; []; _∷_; sum)
+open import Data.List.NonEmpty using (List⁺; _∷_; toList)
 import Relation.Binary.PropositionalEquality as Eq
 open Eq using (_≡_; refl)
 
-data _,_⊢_⟶_ : ∀ (A : Set) → ℕ → List A → List ℕ → Set
-infix 3 _,_⊢_⟶_
+data Dom (A : Set): Set where
+  leaf : A → Dom A
+  node : List⁺ (Dom A) → Dom A
 
-data _⟶₂_ : ℕ → ℕ → Set where
-  s : ∀ {n : ℕ} → n ⟶₂ suc n
+data _⊢_⟶_ : ∀ (A : Set) → List⁺ (Dom A) → ℕ → Set
+infix 3 _⊢_⟶_
 
-data _,_⊢_⟶_ where
+data _⊢_⟶₂_ : (A : Set) → Dom A → ℕ → Set where
+  Leaf : ∀ {A : Set} {a : A}
+      -----------------------
+    → A ⊢ leaf a ⟶₂ 1
+
+  Node : ∀ {A : Set} {n : ℕ} {as : List⁺ (Dom A)}
+    → A ⊢ as ⟶ n
+      -----------------
+    → A ⊢ node as ⟶₂ n
+
+data _⊢_⟶_ where
   Done :
      ∀ {A : Set}
+       {a : Dom A}
        {n : ℕ}
-       -----------------
-     → A , n ⊢ [] ⟶ []
+     → A ⊢ a ⟶₂ n
+       ---------------
+     → A ⊢ a ∷ [] ⟶ n
 
   Recurse :
      ∀ {A : Set}
-       {n : ℕ}
-       {a  : A}
-       {as : List A}
-       {m  : ℕ}
-       {ns : List ℕ}
-     → n ⟶₂ m
-     → A , suc n ⊢ as ⟶ ns
-       ------------------------------
-     → A ,     n ⊢ a ∷ as ⟶ m ∷ ns
+       {a b : Dom A}
+       {n m : ℕ}
+       {cs : List (Dom A)}
+     → A ⊢ a ⟶₂ n
+     → A ⊢ b ∷ cs ⟶ m
+       -----------------------
+     → A ⊢ a ∷ b ∷ cs ⟶ n + m
 
-⟶-is-deterministic : ∀ {A : Set} {n : ℕ} {as : List A} {ns ns' : List ℕ}
-  → A , n ⊢ as ⟶ ns
-  → A , n ⊢ as ⟶ ns'
+⟶-is-deterministic : ∀ {A : Set} {as : List⁺ (Dom A)} {n n' : ℕ}
+  → A ⊢ as ⟶ n
+  → A ⊢ as ⟶ n'
     ------------
-  → ns ≡ ns'
-⟶-is-deterministic Done Done = refl
-⟶-is-deterministic (Recurse x x₂) (Recurse x₁ y) = ?
+  → n ≡ n'
+⟶-is-deterministic (Done x) (Done x₁) = {!!}
+⟶-is-deterministic (Recurse x x₁) (Recurse x₂ y) = {!!}
